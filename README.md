@@ -14,6 +14,7 @@ Este proyecto implementa una API REST con Node.js, Express y PostgreSQL siguiend
   - [v0.4.0 - Validación con Zod](#v040---validación-con-zod)
   - [v0.5.0 - Módulo Auth (registro/login)](#v050---módulo-auth-registrologin)
   - [v0.6.0 - Middleware de autenticación](#v060---middleware-de-autenticación)
+  - [v0.7.0 - Mejoras en Users](#v070---mejoras-en-users-actualizar-perfil-y-cambiar-contraseña)
 
 ---
 
@@ -1382,6 +1383,301 @@ curl http://localhost:3000/api/users/me \
 4. Middleware valida JWT
 5. Si válido, añade `req.user` y permite acceso
 6. Controller accede a `req.user.sub` y `req.user.email`
+
+---
+
+## v0.7.0 - Mejoras en Users (actualizar perfil y cambiar contraseña)
+
+**Objetivo:** Añadir endpoints para que un usuario autenticado pueda actualizar su propio perfil y cambiar su contraseña de forma segura.
+
+### Paso 1: Añadir nuevos schemas de validación
+
+Editar `src/modules/users/users.schema.ts` y añadir:
+
+```typescript
+export const updateProfileSchema = z.object({
+  name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres').optional(),
+  email: z.string().email('Email inválido').optional(),
+});
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'La contraseña actual es requerida'),
+  newPassword: z.string().min(8, 'La nueva contraseña debe tener al menos 8 caracteres')
+});
+
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+```
+
+**Schemas añadidos:**
+- `updateProfileSchema` - Para actualizar name/email del perfil propio
+- `changePasswordSchema` - Para cambiar contraseña (requiere contraseña actual)
+
+**Diferencia con updateUserSchema:**
+- `updateProfileSchema` - Usuario actualiza SU propio perfil (usa ID del token)
+- `updateUserSchema` - Admin actualiza cualquier usuario (usa ID del parámetro)
+
+### Paso 2: Añadir funciones al service
+
+Editar `src/modules/users/users.service.ts` y añadir imports y funciones:
+
+```typescript
+import bcrypt from 'bcrypt';
+import { env } from '../../config/env.js';
+
+export async function updateProfile(userId: number, data: { name?: string; email?: string }) {
+  return prisma.user.update({
+    where: { id: userId },
+    data,
+    select: { id: true, email: true, name: true, createdAt: true }
+  });
+}
+
+export async function changePassword(userId: number, currentPassword: string, newPassword: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  
+  if (!user) {
+    throw new Error('Usuario no encontrado');
+  }
+  
+  const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+  
+  if (!isValid) {
+    throw new Error('Contraseña actual incorrecta');
+  }
+  
+  const newHash = await bcrypt.hash(newPassword, env.BCRYPT_SALT_ROUNDS);
+  
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash: newHash }
+  });
+  
+  return { message: 'Contraseña actualizada correctamente' };
+}
+```
+
+**Función updateProfile:**
+- Actualiza name y/o email del usuario por ID
+- Usa ID extraído del JWT (req.user.sub)
+- Retorna usuario actualizado sin passwordHash
+
+**Función changePassword:**
+1. Busca usuario por ID
+2. Valida contraseña actual con `bcrypt.compare()`
+3. Si inválida, lanza error (retorna 400)
+4. Si válida, hashea nueva contraseña con bcrypt
+5. Actualiza passwordHash en base de datos
+6. Retorna mensaje de éxito
+
+**Seguridad:**
+- Usuario no puede cambiar contraseña sin conocer la actual
+- Previene que alguien con sesión robada cambie la contraseña
+- Nueva contraseña también hasheada con bcrypt
+
+### Paso 3: Añadir controllers
+
+Editar `src/modules/users/users.controller.ts` y añadir:
+
+```typescript
+import { updateProfile, changePassword } from './users.service.js';
+
+export async function updateProfileCtrl(req: Request, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'No autorizado' });
+    }
+    
+    const user = await updateProfile(req.user.sub, req.body);
+    res.json(user);
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ message: 'El email ya está en uso' });
+    }
+    res.status(500).json({ message: error.message });
+  }
+}
+
+export async function changePasswordCtrl(req: Request, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'No autorizado' });
+    }
+    
+    const { currentPassword, newPassword } = req.body;
+    const result = await changePassword(req.user.sub, currentPassword, newPassword);
+    res.json(result);
+  } catch (error: any) {
+    if (error.message === 'Contraseña actual incorrecta') {
+      return res.status(400).json({ message: error.message });
+    }
+    res.status(500).json({ message: error.message });
+  }
+}
+```
+
+**updateProfileCtrl:**
+- Lee user ID desde `req.user.sub` (inyectado por middleware auth)
+- No necesita ID en parámetros (usa ID del token)
+- Maneja error de email duplicado (P2002)
+
+**changePasswordCtrl:**
+- Lee user ID desde `req.user.sub`
+- Extrae currentPassword y newPassword del body
+- Maneja error de contraseña incorrecta con 400
+
+### Paso 4: Añadir rutas
+
+Editar `src/modules/users/users.routes.ts`:
+
+```typescript
+import { updateProfileSchema, changePasswordSchema } from './users.schema.js';
+import { updateProfileCtrl, changePasswordCtrl } from './users.controller.js';
+
+router.patch('/me', auth, validate(updateProfileSchema), updateProfileCtrl);
+router.patch('/me/password', auth, validate(changePasswordSchema), changePasswordCtrl);
+```
+
+**Orden de rutas importante:**
+```typescript
+router.get('/me', auth, meCtrl);
+router.patch('/me', auth, validate(updateProfileSchema), updateProfileCtrl);
+router.patch('/me/password', auth, validate(changePasswordSchema), changePasswordCtrl);
+router.get('/:id', auth, getUserCtrl);
+```
+
+**Por qué este orden:**
+- Rutas específicas (`/me`, `/me/password`) ANTES de rutas dinámicas (`/:id`)
+- Si `/:id` va primero, Express matchearía `/me` como ID = "me"
+- Rutas más específicas siempre primero
+
+### Paso 5: Compilar y verificar
+
+```bash
+npm run build
+```
+
+**Debe compilar sin errores.**
+
+### Paso 6: Probar actualización de perfil
+
+```bash
+npm start
+
+# Login para obtener token
+TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"password123"}' \
+  | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+
+# Actualizar perfil
+curl -X PATCH http://localhost:3000/api/users/me \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"name":"Updated Name"}'
+```
+
+**Respuesta esperada (200):**
+```json
+{
+  "id": 1,
+  "email": "test@example.com",
+  "name": "Updated Name",
+  "createdAt": "2025-11-04T11:34:54.797Z"
+}
+```
+
+### Paso 7: Probar cambio de contraseña
+
+```bash
+curl -X PATCH http://localhost:3000/api/users/me/password \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"currentPassword":"password123","newPassword":"newpassword456"}'
+```
+
+**Respuesta esperada (200):**
+```json
+{
+  "message": "Contraseña actualizada correctamente"
+}
+```
+
+### Paso 8: Verificar nueva contraseña funciona
+
+```bash
+# Login con nueva contraseña
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"newpassword456"}'
+```
+
+**Debe retornar token correctamente.**
+
+### Paso 9: Probar caso de error - contraseña incorrecta
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"newpassword456"}' \
+  | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+
+curl -X PATCH http://localhost:3000/api/users/me/password \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"currentPassword":"wrongpassword","newPassword":"another123"}'
+```
+
+**Respuesta esperada (400):**
+```json
+{
+  "message": "Contraseña actual incorrecta"
+}
+```
+
+### ✅ Resultado v0.7.0
+
+- ✅ Endpoint para actualizar perfil propio
+- ✅ Endpoint para cambiar contraseña
+- ✅ Validación de contraseña actual con bcrypt
+- ✅ Schemas Zod con validaciones
+- ✅ Usuario solo modifica su propio perfil
+- ✅ Manejo de errores (email duplicado, contraseña incorrecta)
+- ✅ Nueva contraseña hasheada correctamente
+
+**Archivos modificados:**
+- `src/modules/users/users.schema.ts` - Añadidos 2 schemas
+- `src/modules/users/users.service.ts` - Añadidas 2 funciones
+- `src/modules/users/users.controller.ts` - Añadidos 2 controllers
+- `src/modules/users/users.routes.ts` - Añadidas 2 rutas
+
+**Rutas añadidas:**
+- `PATCH /api/users/me` - Actualizar perfil (requiere JWT)
+- `PATCH /api/users/me/password` - Cambiar contraseña (requiere JWT)
+
+**Flujo de actualización de perfil:**
+1. Usuario autenticado envía PATCH /api/users/me
+2. Middleware auth valida JWT y añade req.user
+3. Middleware validate valida body con updateProfileSchema
+4. Controller lee user ID desde req.user.sub
+5. Service actualiza usuario por ID
+6. Retorna usuario actualizado
+
+**Flujo de cambio de contraseña:**
+1. Usuario envía currentPassword y newPassword
+2. Middleware auth valida JWT
+3. Middleware validate valida schema
+4. Controller extrae req.user.sub
+5. Service busca usuario y valida contraseña actual
+6. Si válida, hashea nueva contraseña y actualiza
+7. Retorna mensaje de éxito
+
+**Seguridad mejorada:**
+- Usuario no puede modificar otros perfiles (usa ID del token)
+- Cambio de contraseña requiere conocer contraseña actual
+- Protección contra sesiones robadas
+- Email único validado por Prisma
+- Todas las contraseñas hasheadas con bcrypt
 
 ---
 

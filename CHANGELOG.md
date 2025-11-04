@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.7.0 - Mejoras en Users (actualizar perfil y cambiar contraseña)
+
+### Añadido
+- Endpoint para actualizar perfil propio sin especificar ID
+- Endpoint para cambiar contraseña con validación de contraseña actual
+- Schemas Zod para actualizar perfil y cambiar contraseña
+- Funciones en service para updateProfile y changePassword
+- Validación de contraseña actual con bcrypt.compare
+
+### Endpoints nuevos
+- `PATCH /api/users/me` - Actualizar perfil propio (requiere JWT)
+- `PATCH /api/users/me/password` - Cambiar contraseña (requiere JWT)
+
+### Seguridad
+- Cambio de contraseña requiere contraseña actual
+- Hash de nueva contraseña con bcrypt
+- Validación de contraseña actual antes de actualizar
+- Usuario solo puede actualizar su propio perfil mediante /me
+
+### Schemas Zod
+- `updateProfileSchema` - name y email opcionales
+- `changePasswordSchema` - currentPassword y newPassword (min 8)
+
+### Flujo de actualización de perfil
+1. Usuario autenticado envía PATCH a /api/users/me
+2. Middleware auth extrae user id desde JWT
+3. Service actualiza usuario por ID del token
+4. Retorna usuario actualizado
+
+### Flujo de cambio de contraseña
+1. Usuario envía contraseña actual y nueva
+2. Service busca usuario por ID del token
+3. Verifica contraseña actual con bcrypt.compare
+4. Si válida, hashea nueva contraseña
+5. Actualiza passwordHash en base de datos
+6. Retorna mensaje de éxito
+
+### Archivos modificados
+- `src/modules/users/users.schema.ts` - Añadidos schemas
+- `src/modules/users/users.service.ts` - Añadidas funciones
+- `src/modules/users/users.controller.ts` - Añadidos controllers
+- `src/modules/users/users.routes.ts` - Añadidas rutas
+
+---
+
 ## v0.6.0 - Middleware de autenticación
 
 ### Añadido

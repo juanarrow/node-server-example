@@ -104,6 +104,49 @@ curl http://localhost:3000/api/users/me \
 }
 ```
 
+### Actualizar perfil propio
+```bash
+curl -X PATCH http://localhost:3000/api/users/me \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"name":"Nuevo Nombre","email":"nuevo@email.com"}'
+```
+
+**Response (200):**
+```json
+{
+  "id": 1,
+  "email": "nuevo@email.com",
+  "name": "Nuevo Nombre",
+  "createdAt": "2025-11-04T11:34:54.797Z"
+}
+```
+
+### Cambiar contraseña
+```bash
+curl -X PATCH http://localhost:3000/api/users/me/password \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"currentPassword":"password123","newPassword":"newpassword456"}'
+```
+
+**Response (200):**
+```json
+{
+  "message": "Contraseña actualizada correctamente"
+}
+```
+
+### Casos de error - Cambio de contraseña
+
+**Contraseña actual incorrecta (400):**
+```bash
+curl -X PATCH http://localhost:3000/api/users/me/password \
+  -d '{"currentPassword":"wrongpassword","newPassword":"newpass123"}'
+
+# {"message":"Contraseña actual incorrecta"}
+```
+
 ### Listar usuarios
 ```bash
 curl http://localhost:3000/api/users \
