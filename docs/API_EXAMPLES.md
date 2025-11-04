@@ -84,28 +84,65 @@ curl -X POST http://localhost:3000/api/auth/register \
 
 ---
 
-## Users
+## Users (Rutas protegidas con JWT)
+
+Todas las rutas de usuarios requieren autenticación con JWT. Incluye el header `Authorization: Bearer <token>`.
+
+### Obtener perfil del usuario autenticado
+```bash
+curl http://localhost:3000/api/users/me \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**Response (200):**
+```json
+{
+  "id": 1,
+  "email": "test@example.com",
+  "name": "Test User",
+  "createdAt": "2025-11-04T11:34:54.797Z"
+}
+```
 
 ### Listar usuarios
 ```bash
-curl http://localhost:3000/api/users
+curl http://localhost:3000/api/users \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ### Obtener usuario por ID
 ```bash
-curl http://localhost:3000/api/users/1
+curl http://localhost:3000/api/users/1 \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ### Actualizar usuario
 ```bash
 curl -X PATCH http://localhost:3000/api/users/1 \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
   -d '{"name":"Nuevo Nombre","email":"nuevo@email.com"}'
 ```
 
 ### Eliminar usuario
 ```bash
-curl -X DELETE http://localhost:3000/api/users/1
+curl -X DELETE http://localhost:3000/api/users/1 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Acceso sin token (401)
+```bash
+curl http://localhost:3000/api/users
+
+# {"message":"No autorizado"}
+```
+
+### Token inválido (401)
+```bash
+curl http://localhost:3000/api/users/me \
+  -H "Authorization: Bearer invalid_token"
+
+# {"message":"Token inválido"}
 ```
 
 ---

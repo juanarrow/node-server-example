@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { listUsers, findUserById, updateUser, deleteUser } from './users.service.js';
+import { listUsers, findUserById, findUserByEmail, updateUser, deleteUser } from './users.service.js';
 
 export async function listUsersCtrl(_req: Request, res: Response) {
   try {
@@ -23,6 +23,28 @@ export async function getUserCtrl(req: Request, res: Response) {
     }
     
     res.json(user);
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+}
+
+export async function meCtrl(req: Request, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'No autorizado' });
+    }
+    
+    const user = await findUserByEmail(req.user.email);
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+    
+    res.json({ 
+      id: user.id, 
+      email: user.email, 
+      name: user.name,
+      createdAt: user.createdAt
+    });
   } catch (error: any) {
     res.status(500).json({ message: error.message });
   }
@@ -64,4 +86,3 @@ export async function deleteUserCtrl(req: Request, res: Response) {
     res.status(500).json({ message: error.message });
   }
 }
-

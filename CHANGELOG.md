@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.6.0 - Middleware de autenticación
+
+### Añadido
+- Middleware de autenticación JWT
+- Verificación de tokens en header Authorization
+- Extensión de tipos Express para incluir req.user
+- Endpoint `/api/users/me` para obtener perfil autenticado
+- Protección de todas las rutas de users con JWT
+
+### Rutas protegidas
+- `GET /api/users` - Requiere JWT
+- `GET /api/users/me` - Requiere JWT (nuevo)
+- `GET /api/users/:id` - Requiere JWT
+- `PATCH /api/users/:id` - Requiere JWT
+- `DELETE /api/users/:id` - Requiere JWT
+
+### Seguridad
+- Validación de formato Bearer token
+- Verificación de firma JWT con secret
+- Validación de payload (sub, email)
+- Mensajes de error claros: "No autorizado" / "Token inválido"
+
+### Middleware auth
+- Lee header Authorization
+- Verifica formato "Bearer <token>"
+- Valida token con jwt.verify()
+- Inyecta req.user con { sub, email }
+- Retorna 401 si falla la autenticación
+
+### Flujo de uso
+1. Usuario hace login → recibe JWT
+2. Cliente guarda JWT
+3. Cliente envía JWT en header: `Authorization: Bearer <token>`
+4. Middleware valida JWT
+5. Si válido, permite acceso y añade req.user
+6. Controller puede acceder a req.user.email, req.user.sub
+
+### Archivos principales
+- `src/middleware/auth.ts` - Middleware JWT
+- `src/modules/users/users.controller.ts` - Añadido meCtrl
+- `src/modules/users/users.routes.ts` - Rutas protegidas
+
+---
+
 ## v0.5.0 - Módulo Auth (registro/login)
 
 ### Añadido
