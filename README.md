@@ -18,6 +18,7 @@ Este proyecto implementa una API REST con Node.js, Express y PostgreSQL siguiend
   - [v0.8.0 - Seguridad adicional](#v080---seguridad-adicional-rate-limiting-y-logging)
   - [v0.9.0 - Testing](#v090---testing-con-jest-y-supertest)
   - [v1.0.0 - Producción](#v100---producción-y-documentación)
+  - [v1.0.1 - Fix Swagger](#v101---fix-documentación-swagger-completa)
 
 ---
 
@@ -3346,6 +3347,103 @@ El proyecto ha alcanzado su versión 1.0.0 con todas las funcionalidades impleme
 - Testing completo con Jest
 - Documentación OpenAPI/Swagger
 - Docker y Docker Compose listos para deployment
+
+---
+
+## v1.0.1 - Fix: Documentación Swagger completa
+
+**Objetivo:** Corregir la documentación OpenAPI/Swagger para que todos los endpoints aparezcan correctamente en Swagger UI.
+
+### Problema detectado
+
+La documentación Swagger no mostraba ningún endpoint en `/api-docs` debido a dos problemas:
+
+1. Las rutas no tenían anotaciones JSDoc `@swagger`
+2. La configuración de `swagger.ts` buscaba archivos `.ts` en lugar de `.js` compilados
+
+### Cambios realizados
+
+#### 1. Anotaciones JSDoc en `src/modules/auth/auth.routes.ts`
+
+```typescript
+/**
+ * @swagger
+ * /api/auth/register:
+ *   post:
+ *     summary: Registra un nuevo usuario
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/RegisterInput'
+ *     responses:
+ *       201:
+ *         description: Usuario registrado exitosamente
+ *       409:
+ *         description: Email ya registrado
+ */
+router.post('/register', validate(registerSchema), registerCtrl);
+```
+
+Documentados: `POST /api/auth/register` y `POST /api/auth/login`
+
+#### 2. Anotaciones JSDoc en `src/modules/users/users.routes.ts`
+
+Documentados todos los endpoints de usuarios:
+- `GET /api/users` - Listar usuarios
+- `GET /api/users/me` - Perfil propio
+- `PATCH /api/users/me` - Actualizar perfil
+- `PATCH /api/users/me/password` - Cambiar contraseña
+- `GET /api/users/{id}` - Obtener usuario
+- `PATCH /api/users/{id}` - Actualizar usuario
+- `DELETE /api/users/{id}` - Eliminar usuario
+
+#### 3. Fix en `src/config/swagger.ts`
+
+```typescript
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const options: swaggerJsdoc.Options = {
+  definition: { /* ... */ },
+  apis: [join(__dirname, '../modules/**/*.routes.js')],
+};
+```
+
+Cambio clave: usar rutas absolutas con `join(__dirname, ...)` apuntando a archivos `.js` compilados.
+
+### Verificación
+
+```bash
+curl http://localhost:3000/api-docs
+```
+
+Ahora Swagger UI muestra correctamente:
+- 2 endpoints de Auth
+- 7 endpoints de Users
+- Documentación completa con request/response schemas
+- Botón "Authorize" para probar endpoints protegidos
+
+### Reconstruir y desplegar
+
+```bash
+npm run build
+docker-compose -f docker-compose.prod.yml build api
+docker-compose -f docker-compose.prod.yml up -d api
+```
+
+### Resumen
+
+✅ **Swagger UI completamente funcional**
+- Todos los endpoints documentados
+- Schemas reutilizables definidos
+- Security schemes (JWT) configurados
+- Listo para probar la API desde el navegador
 
 ---
 
