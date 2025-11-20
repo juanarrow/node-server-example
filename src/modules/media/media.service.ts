@@ -1,5 +1,5 @@
 import { v2 as cloudinary } from 'cloudinary';
-import { prisma } from '../../lib/prisma.js';
+import { prisma } from '../../config/db.js';
 import { env } from '../../config/env.js';
 
 // Configurar Cloudinary

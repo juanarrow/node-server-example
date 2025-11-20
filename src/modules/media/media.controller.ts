@@ -51,7 +51,7 @@ export async function listCtrl(req: Request, res: Response) {
  */
 export async function getByIdCtrl(req: Request, res: Response) {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id!, 10);
     
     if (isNaN(id)) {
       return res.status(400).json({ error: 'ID inválido' });
@@ -85,7 +85,7 @@ export async function deleteCtrl(req: Request, res: Response) {
       return res.status(401).json({ error: 'No autenticado' });
     }
 
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id!, 10);
     
     if (isNaN(id)) {
       return res.status(400).json({ error: 'ID inválido' });
