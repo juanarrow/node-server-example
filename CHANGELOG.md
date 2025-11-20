@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.2 - Fix errores de TypeScript en media module
+
+### Corregido
+- **TypeScript strict mode**: Agregado non-null assertion a `req.params.id` en `media.controller.ts`
+- **Import path**: Corregido import de prisma en `media.service.ts` (de `lib/` a `config/`)
+- Agregado radix `10` explícito en llamadas a `parseInt()`
+
 ## v1.1.1 - Configuración de ejemplo actualizada
 
 ### Cambiado
