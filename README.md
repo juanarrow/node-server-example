@@ -3532,6 +3532,762 @@ info: Entorno: development
 
 ---
 
+## v1.1.0 - Upload de medios con Cloudinary
+
+**Objetivo:** Implementar funcionalidad completa de subida, gestión y eliminación de archivos multimedia (imágenes y videos) usando Cloudinary como servicio de almacenamiento en la nube.
+
+### Resumen de funcionalidades
+
+✅ **Upload de archivos** a Cloudinary con Multer  
+✅ **Gestión de medios** por usuario autenticado  
+✅ **Almacenamiento en carpetas** organizadas por usuario  
+✅ **Validación de tipos** (solo imágenes y videos)  
+✅ **Límite de tamaño** de 10MB por archivo  
+✅ **Base de datos** con tabla Media y relaciones  
+✅ **Tests de integración** completos  
+✅ **Documentación Swagger** actualizada  
+
+### Paso 1: Instalar dependencias
+
+```bash
+npm install cloudinary multer
+npm install -D @types/multer
+```
+
+**Dependencias añadidas:**
+- `cloudinary` (v2.8.0) - SDK de Cloudinary para Node.js
+- `multer` (v2.0.2) - Middleware para `multipart/form-data`
+- `@types/multer` (v2.0.0) - Tipos TypeScript para Multer
+
+### Paso 2: Configurar variables de entorno
+
+Las credenciales de Cloudinary se obtienen desde el dashboard de Cloudinary en https://cloudinary.com/console
+
+**Actualizar `.env`:**
+
+```env
+PORT=3000
+NODE_ENV=development
+JWT_SECRET=8ba5cd48c57e4f35d91093ee1b8ea319
+DATABASE_URL="postgresql://user:password@host:5432/database"
+BCRYPT_SALT_ROUNDS=10
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+```
+
+**Actualizar `src/config/env.ts`:**
+
+```typescript
+export const env = {
+  PORT: Number(process.env.PORT ?? 3000),
+  NODE_ENV: process.env.NODE_ENV ?? 'development',
+  JWT_SECRET: required(process.env.JWT_SECRET, 'JWT_SECRET'),
+  DATABASE_URL: required(process.env.DATABASE_URL, 'DATABASE_URL'),
+  BCRYPT_SALT_ROUNDS: Number(process.env.BCRYPT_SALT_ROUNDS ?? 10),
+  CLOUDINARY_CLOUD_NAME: required(process.env.CLOUDINARY_CLOUD_NAME, 'CLOUDINARY_CLOUD_NAME'),
+  CLOUDINARY_API_KEY: required(process.env.CLOUDINARY_API_KEY, 'CLOUDINARY_API_KEY'),
+  CLOUDINARY_API_SECRET: required(process.env.CLOUDINARY_API_SECRET, 'CLOUDINARY_API_SECRET'),
+};
+```
+
+### Paso 3: Crear modelo Media en Prisma
+
+**Actualizar `prisma/schema.prisma`:**
+
+```prisma
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  media        Media[]  // ← Nueva relación
+}
+
+model Media {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  publicId     String   @unique
+  secureUrl    String
+  format       String
+  resourceType String
+  bytes        Int
+  width        Int?
+  height       Int?
+  
+  originalName String?
+  folder       String?
+  
+  createdAt    DateTime @default(now())
+  
+  @@index([userId])
+  @@index([createdAt])
+}
+```
+
+**Campos explicados:**
+- `publicId`: ID único del archivo en Cloudinary (ej: `user_1/abc123`)
+- `secureUrl`: URL HTTPS del archivo en Cloudinary
+- `format`: Extensión del archivo (jpg, png, mp4, etc)
+- `resourceType`: Tipo de recurso (image, video, raw)
+- `bytes`: Tamaño en bytes
+- `width`, `height`: Dimensiones (null para archivos no visuales)
+- `originalName`: Nombre original del archivo subido
+- `folder`: Carpeta en Cloudinary (organizamos por usuario)
+
+**Crear migración:**
+
+```bash
+npx prisma migrate dev --name add_media_table
+```
+
+Esto genera:
+- Nueva migración SQL en `prisma/migrations/`
+- Actualiza Prisma Client con el modelo `Media`
+
+### Paso 4: Crear módulo Media
+
+#### 4.1 Schema (Validación con Zod)
+
+**`src/modules/media/media.schema.ts`:**
+
+```typescript
+import { z } from 'zod';
+
+export const mediaSchema = z.object({
+  id: z.number(),
+  userId: z.number(),
+  publicId: z.string(),
+  secureUrl: z.string().url(),
+  format: z.string(),
+  resourceType: z.string(),
+  bytes: z.number(),
+  width: z.number().nullable(),
+  height: z.number().nullable(),
+  originalName: z.string().nullable(),
+  folder: z.string().nullable(),
+  createdAt: z.date(),
+});
+
+export type Media = z.infer<typeof mediaSchema>;
+```
+
+#### 4.2 Service (Lógica de negocio)
+
+**`src/modules/media/media.service.ts`:**
+
+```typescript
+import { v2 as cloudinary } from 'cloudinary';
+import { prisma } from '../../lib/prisma.js';
+import { env } from '../../config/env.js';
+
+// Configurar Cloudinary
+cloudinary.config({
+  cloud_name: env.CLOUDINARY_CLOUD_NAME,
+  api_key: env.CLOUDINARY_API_KEY,
+  api_secret: env.CLOUDINARY_API_SECRET,
+});
+
+/**
+ * Sube un archivo a Cloudinary y guarda el registro en la base de datos
+ */
+export async function uploadMedia(
+  userId: number,
+  file: Express.Multer.File
+): Promise<UploadResult> {
+  // Subir a Cloudinary usando stream (archivo en memoria)
+  const result = await new Promise<any>((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: `user_${userId}`,  // Organizar por usuario
+        resource_type: 'auto',      // Detectar tipo automáticamente
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+    uploadStream.end(file.buffer);
+  });
+
+  // Guardar en base de datos
+  const media = await prisma.media.create({
+    data: {
+      userId,
+      publicId: result.public_id,
+      secureUrl: result.secure_url,
+      format: result.format,
+      resourceType: result.resource_type,
+      bytes: result.bytes,
+      width: result.width || null,
+      height: result.height || null,
+      originalName: file.originalname,
+      folder: result.folder || null,
+    },
+  });
+
+  return media;
+}
+
+/**
+ * Lista todos los medios del usuario
+ */
+export async function listUserMedia(userId: number) {
+  return prisma.media.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+/**
+ * Obtiene un medio por ID
+ */
+export async function getMediaById(id: number) {
+  return prisma.media.findUnique({
+    where: { id },
+  });
+}
+
+/**
+ * Elimina un medio de Cloudinary y de la base de datos
+ */
+export async function deleteMedia(id: number, userId: number): Promise<boolean> {
+  // Verificar que el media pertenece al usuario
+  const media = await prisma.media.findFirst({
+    where: { id, userId },
+  });
+
+  if (!media) {
+    return false;
+  }
+
+  // Eliminar de Cloudinary
+  await cloudinary.uploader.destroy(media.publicId);
+
+  // Eliminar de base de datos
+  await prisma.media.delete({
+    where: { id },
+  });
+
+  return true;
+}
+```
+
+**Puntos clave:**
+- **Upload con streams**: Multer guarda el archivo en memoria (`buffer`), lo enviamos a Cloudinary vía stream
+- **Organización**: Cada usuario tiene su carpeta en Cloudinary (`user_1`, `user_2`, etc)
+- **Verificación de propiedad**: Solo se puede eliminar si `userId` coincide
+- **Sincronización**: Al eliminar, se borra tanto de Cloudinary como de la DB
+
+#### 4.3 Controller (Handlers HTTP)
+
+**`src/modules/media/media.controller.ts`:**
+
+```typescript
+import type { Request, Response } from 'express';
+import * as mediaService from './media.service.js';
+import { logger } from '../../utils/logger.js';
+
+/**
+ * POST /api/media/upload
+ */
+export async function uploadCtrl(req: Request, res: Response) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No se proporcionó ningún archivo' });
+    }
+
+    if (!req.user) {
+      return res.status(401).json({ error: 'No autenticado' });
+    }
+
+    const media = await mediaService.uploadMedia(req.user.sub, req.file);
+    
+    logger.info(`Usuario ${req.user.sub} subió archivo: ${media.publicId}`);
+    
+    res.status(201).json(media);
+  } catch (error) {
+    logger.error('Error en uploadCtrl:', error);
+    res.status(500).json({ error: 'Error al subir el archivo' });
+  }
+}
+
+/**
+ * GET /api/media
+ */
+export async function listCtrl(req: Request, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'No autenticado' });
+    }
+
+    const media = await mediaService.listUserMedia(req.user.sub);
+    res.json(media);
+  } catch (error) {
+    logger.error('Error en listCtrl:', error);
+    res.status(500).json({ error: 'Error al listar medios' });
+  }
+}
+
+/**
+ * GET /api/media/:id
+ */
+export async function getByIdCtrl(req: Request, res: Response) {
+  try {
+    const id = parseInt(req.params.id);
+    
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    const media = await mediaService.getMediaById(id);
+    
+    if (!media) {
+      return res.status(404).json({ error: 'Media no encontrado' });
+    }
+
+    if (req.user && media.userId !== req.user.sub) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    res.json(media);
+  } catch (error) {
+    logger.error('Error en getByIdCtrl:', error);
+    res.status(500).json({ error: 'Error al obtener el media' });
+  }
+}
+
+/**
+ * DELETE /api/media/:id
+ */
+export async function deleteCtrl(req: Request, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'No autenticado' });
+    }
+
+    const id = parseInt(req.params.id);
+    
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'ID inválido' });
+    }
+
+    const deleted = await mediaService.deleteMedia(id, req.user.sub);
+    
+    if (!deleted) {
+      return res.status(404).json({ error: 'Media no encontrado o no autorizado' });
+    }
+
+    logger.info(`Usuario ${req.user.sub} eliminó media ${id}`);
+    
+    res.status(204).send();
+  } catch (error) {
+    logger.error('Error en deleteCtrl:', error);
+    res.status(500).json({ error: 'Error al eliminar el media' });
+  }
+}
+```
+
+#### 4.4 Routes (Rutas con Multer)
+
+**`src/modules/media/media.routes.ts`:**
+
+```typescript
+import { Router } from 'express';
+import multer from 'multer';
+import { auth } from '../../middleware/auth.js';
+import { uploadCtrl, listCtrl, getByIdCtrl, deleteCtrl } from './media.controller.js';
+
+const router = Router();
+
+// Configurar multer para almacenar archivos en memoria
+const upload = multer({
+  storage: multer.memoryStorage(),  // Buffer en RAM
+  limits: {
+    fileSize: 10 * 1024 * 1024,     // 10 MB
+  },
+  fileFilter: (req, file, cb) => {
+    // Permitir solo imágenes y videos
+    const allowedMimes = [
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'video/mp4',
+      'video/mpeg',
+      'video/quicktime',
+    ];
+    
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Tipo de archivo no permitido'));
+    }
+  },
+});
+
+/**
+ * @swagger
+ * /api/media/upload:
+ *   post:
+ *     summary: Sube un archivo a Cloudinary
+ *     tags: [Media]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       201:
+ *         description: Archivo subido exitosamente
+ */
+router.post('/upload', auth, upload.single('file'), uploadCtrl);
+
+/**
+ * @swagger
+ * /api/media:
+ *   get:
+ *     summary: Lista todos los medios del usuario autenticado
+ *     tags: [Media]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get('/', auth, listCtrl);
+
+/**
+ * @swagger
+ * /api/media/{id}:
+ *   get:
+ *     summary: Obtiene un medio por ID
+ *     tags: [Media]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get('/:id', auth, getByIdCtrl);
+
+/**
+ * @swagger
+ * /api/media/{id}:
+ *   delete:
+ *     summary: Elimina un medio
+ *     tags: [Media]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.delete('/:id', auth, deleteCtrl);
+
+export default router;
+```
+
+**Configuración Multer explicada:**
+- `memoryStorage()`: Guarda archivo en RAM (buffer) temporalmente
+- `fileSize: 10MB`: Límite máximo
+- `fileFilter`: Solo permite imágenes y videos por MIME type
+
+### Paso 5: Integrar en la aplicación
+
+**Actualizar `src/app.ts`:**
+
+```typescript
+import mediaRoutes from './modules/media/media.routes.js';
+
+// ...
+
+app.use('/api/users', usersRoutes);
+app.use('/api/media', mediaRoutes);  // ← Nueva ruta
+
+app.use(errorHandler);
+```
+
+### Paso 6: Tests de integración
+
+**`src/tests/media.test.ts`:**
+
+```typescript
+import request from 'supertest';
+import app from '../app.js';
+import { prisma } from '../lib/prisma.js';
+
+describe('Media API', () => {
+  let authToken: string;
+  let userId: number;
+
+  beforeAll(async () => {
+    await prisma.media.deleteMany();
+    await prisma.user.deleteMany();
+
+    const registerRes = await request(app)
+      .post('/api/auth/register')
+      .send({
+        email: 'mediauser@test.com',
+        name: 'Media User',
+        password: 'Test1234',
+      });
+
+    authToken = registerRes.body.token;
+    userId = registerRes.body.user.id;
+  });
+
+  afterAll(async () => {
+    await prisma.media.deleteMany();
+    await prisma.user.deleteMany();
+    await prisma.$disconnect();
+  });
+
+  describe('POST /api/media/upload', () => {
+    it('debería subir una imagen exitosamente', async () => {
+      const imageBuffer = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64'
+      );
+
+      const res = await request(app)
+        .post('/api/media/upload')
+        .set('Authorization', `Bearer ${authToken}`)
+        .attach('file', imageBuffer, 'test.png');
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty('publicId');
+      expect(res.body).toHaveProperty('secureUrl');
+      expect(res.body.userId).toBe(userId);
+    }, 15000);
+
+    it('debería fallar sin archivo', async () => {
+      const res = await request(app)
+        .post('/api/media/upload')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(res.status).toBe(400);
+    });
+
+    it('debería fallar sin autenticación', async () => {
+      const res = await request(app).post('/api/media/upload');
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('GET /api/media', () => {
+    it('debería listar medios del usuario', async () => {
+      const res = await request(app)
+        .get('/api/media')
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+    });
+  });
+
+  describe('DELETE /api/media/:id', () => {
+    it('debería eliminar un media exitosamente', async () => {
+      // Upload primero
+      const imageBuffer = Buffer.from('...', 'base64');
+      const uploadRes = await request(app)
+        .post('/api/media/upload')
+        .set('Authorization', `Bearer ${authToken}`)
+        .attach('file', imageBuffer, 'test.png');
+
+      const mediaId = uploadRes.body.id;
+
+      // Eliminar
+      const res = await request(app)
+        .delete(`/api/media/${mediaId}`)
+        .set('Authorization', `Bearer ${authToken}`);
+
+      expect(res.status).toBe(204);
+    }, 15000);
+  });
+});
+```
+
+**Ejecutar tests:**
+
+```bash
+npm test
+```
+
+### Paso 7: Probar la API
+
+#### 7.1 Obtener token de autenticación
+
+```bash
+# Registro
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@test.com","name":"User","password":"password123"}'
+
+# Login
+TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@test.com","password":"password123"}' \
+  | jq -r '.token')
+
+echo $TOKEN
+```
+
+#### 7.2 Subir un archivo
+
+```bash
+# Subir imagen
+curl -X POST http://localhost:3000/api/media/upload \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@/ruta/a/tu/imagen.jpg"
+
+# Respuesta:
+{
+  "id": 1,
+  "userId": 1,
+  "publicId": "user_1/abc123",
+  "secureUrl": "https://res.cloudinary.com/demo/image/upload/v1234567890/user_1/abc123.jpg",
+  "format": "jpg",
+  "resourceType": "image",
+  "bytes": 245678,
+  "width": 1920,
+  "height": 1080,
+  "originalName": "imagen.jpg",
+  "folder": "user_1",
+  "createdAt": "2024-11-20T09:30:00.000Z"
+}
+```
+
+#### 7.3 Listar medios
+
+```bash
+curl http://localhost:3000/api/media \
+  -H "Authorization: Bearer $TOKEN"
+
+# Respuesta:
+[
+  {
+    "id": 1,
+    "publicId": "user_1/abc123",
+    "secureUrl": "https://...",
+    "format": "jpg",
+    ...
+  },
+  {
+    "id": 2,
+    "publicId": "user_1/xyz789",
+    ...
+  }
+]
+```
+
+#### 7.4 Obtener un media por ID
+
+```bash
+curl http://localhost:3000/api/media/1 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### 7.5 Eliminar un media
+
+```bash
+curl -X DELETE http://localhost:3000/api/media/1 \
+  -H "Authorization: Bearer $TOKEN"
+
+# Respuesta: 204 No Content
+```
+
+### Paso 8: Documentación Swagger
+
+Visita **http://localhost:3000/api-docs** para ver la documentación interactiva.
+
+Los nuevos endpoints aparecen bajo el tag **[Media]**:
+- `POST /api/media/upload` - Con input `multipart/form-data`
+- `GET /api/media` - Lista de medios
+- `GET /api/media/{id}` - Detalle de media
+- `DELETE /api/media/{id}` - Eliminar media
+
+### Estructura de archivos creados/modificados
+
+```
+📁 node-server/
+├── src/
+│   ├── modules/
+│   │   └── media/                      ← NUEVO
+│   │       ├── media.schema.ts
+│   │       ├── media.service.ts
+│   │       ├── media.controller.ts
+│   │       └── media.routes.ts
+│   ├── tests/
+│   │   └── media.test.ts               ← NUEVO
+│   ├── config/
+│   │   └── env.ts                      ← MODIFICADO
+│   └── app.ts                          ← MODIFICADO
+├── prisma/
+│   ├── schema.prisma                   ← MODIFICADO
+│   └── migrations/
+│       └── 20251120090028_add_media_table/  ← NUEVO
+│           └── migration.sql
+├── .env                                ← MODIFICADO
+└── package.json                        ← MODIFICADO
+```
+
+### Endpoints finales de la API
+
+**Autenticación:**
+- `POST /api/auth/register` - Registro
+- `POST /api/auth/login` - Login
+
+**Usuarios (requieren JWT):**
+- `GET /api/users` - Listar usuarios
+- `GET /api/users/me` - Perfil propio
+- `PATCH /api/users/me` - Actualizar perfil
+- `PATCH /api/users/me/password` - Cambiar contraseña
+- `GET /api/users/:id` - Usuario por ID
+- `PATCH /api/users/:id` - Actualizar usuario
+- `DELETE /api/users/:id` - Eliminar usuario
+
+**Media (requieren JWT):** ← NUEVO
+- `POST /api/media/upload` - Subir archivo
+- `GET /api/media` - Listar medios propios
+- `GET /api/media/:id` - Detalle de media
+- `DELETE /api/media/:id` - Eliminar media
+
+**Documentación:**
+- `GET /api-docs` - Swagger UI
+- `GET /health` - Health check
+
+### Seguridad implementada
+
+✅ **Autenticación obligatoria** - Todos los endpoints de media requieren JWT  
+✅ **Verificación de propiedad** - Solo puedes eliminar tus propios medios  
+✅ **Validación de tipos MIME** - Solo imágenes y videos permitidos  
+✅ **Límite de tamaño** - Máximo 10MB por archivo  
+✅ **Eliminación en cascada** - Si eliminas un usuario, se eliminan sus medios  
+✅ **Organización por usuario** - Carpetas separadas en Cloudinary  
+
+### Resumen de v1.1.0
+
+✅ **API completa de gestión de medios**
+- Upload, listado, detalle y eliminación
+- Integración con Cloudinary
+- Base de datos sincronizada
+- Tests de integración (11 tests)
+- Documentación Swagger actualizada
+
+**Comandos para crear el tag:**
+
+```bash
+git add .
+git commit -m "feat: Add media upload with Cloudinary integration (v1.1.0)"
+git tag v1.1.0
+git push origin main
+git push origin v1.1.0
+```
+
+---
+
 ## 🛠️ Comandos útiles
 
 ### Desarrollo

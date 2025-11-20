@@ -1,5 +1,85 @@
 # Changelog
 
+## v1.1.0 - Upload de medios con Cloudinary
+
+### Añadido
+- **Módulo de Media completo** para gestión de archivos multimedia
+- **Integración con Cloudinary** para almacenamiento en la nube
+- **Upload de imágenes y videos** con validación de tipo MIME
+- **Tabla `Media` en base de datos** con relación a usuarios
+- **Multer** para procesamiento de archivos multipart/form-data
+- **Límite de 10MB** por archivo
+- **Organización automática** en carpetas por usuario en Cloudinary
+- **Tests de integración** para endpoints de media (11 tests)
+
+### Endpoints añadidos
+- `POST /api/media/upload` - Subir archivo a Cloudinary
+- `GET /api/media` - Listar medios del usuario autenticado
+- `GET /api/media/:id` - Obtener detalles de un medio
+- `DELETE /api/media/:id` - Eliminar media de Cloudinary y DB
+
+### Base de datos
+- **Nueva tabla `Media`**:
+  - `id` (PK, autoincrement)
+  - `userId` (FK a User, CASCADE)
+  - `publicId` (unique) - ID en Cloudinary
+  - `secureUrl` - URL HTTPS del archivo
+  - `format` - Extensión del archivo
+  - `resourceType` - Tipo (image, video, etc)
+  - `bytes` - Tamaño en bytes
+  - `width`, `height` - Dimensiones (nullable)
+  - `originalName` - Nombre original del archivo
+  - `folder` - Carpeta en Cloudinary
+  - `createdAt` - Timestamp de creación
+- **Índices** en `userId` y `createdAt`
+- **Relación User.media** (One-to-Many)
+
+### Seguridad y validación
+- **Autenticación obligatoria** en todos los endpoints
+- **Validación de tipos MIME** (solo imágenes y videos)
+- **Verificación de propiedad** antes de eliminar
+- **Límite de tamaño** de archivo (10MB)
+- **Eliminación en cascada** si se elimina un usuario
+
+### Configuración
+- Variables de entorno Cloudinary:
+  - `CLOUDINARY_CLOUD_NAME`
+  - `CLOUDINARY_API_KEY`
+  - `CLOUDINARY_API_SECRET`
+- Actualizado `src/config/env.ts` con validación
+
+### Archivos creados
+- `src/modules/media/media.schema.ts` - Esquemas Zod
+- `src/modules/media/media.service.ts` - Lógica de Cloudinary + Prisma
+- `src/modules/media/media.controller.ts` - Controladores HTTP
+- `src/modules/media/media.routes.ts` - Rutas y configuración Multer
+- `src/tests/media.test.ts` - 11 tests de integración
+- `prisma/migrations/[timestamp]_add_media_table/` - Migración
+
+### Archivos modificados
+- `prisma/schema.prisma` - Modelo Media y relación
+- `src/app.ts` - Integración de rutas media
+- `src/config/env.ts` - Variables Cloudinary
+- `.env` - Credenciales Cloudinary
+- `package.json` - Dependencias: cloudinary, multer, @types/multer
+
+### Documentación Swagger
+- Schema `Media` documentado
+- Endpoint `/upload` con `multipart/form-data`
+- Todos los endpoints con ejemplos y respuestas
+- Tag `[Media]` para organización
+
+### Dependencias instaladas
+```json
+{
+  "cloudinary": "^2.8.0",
+  "multer": "^2.0.2",
+  "@types/multer": "^2.0.0"
+}
+```
+
+---
+
 ## v1.0.0 - Producción y documentación
 
 ### Añadido
