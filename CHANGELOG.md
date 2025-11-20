@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.1 - Configuración de ejemplo actualizada
+
+### Cambiado
+- **Actualizado `env.production.example`** con variables de Cloudinary
+- Añadidas variables de entorno necesarias para el módulo de media:
+  - `CLOUDINARY_CLOUD_NAME`
+  - `CLOUDINARY_API_KEY`
+  - `CLOUDINARY_API_SECRET`
+
 ## v1.1.0 - Upload de medios con Cloudinary
 
 ### Añadido
