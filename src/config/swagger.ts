@@ -6,6 +6,12 @@ import { env } from './env.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Determinar si estamos en dist/ o src/
+const isCompiled = __dirname.includes('/dist/');
+const projectRoot = isCompiled
+  ? join(__dirname, '../../')  // desde dist/config/ subimos a raíz
+  : join(__dirname, '../../');  // desde src/config/ subimos a raíz
+
 const options: swaggerJsdoc.Options = {
   definition: {
     openapi: '3.0.0',
@@ -128,6 +134,64 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+        Media: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'integer',
+              description: 'ID del media',
+            },
+            userId: {
+              type: 'integer',
+              description: 'ID del usuario propietario',
+            },
+            publicId: {
+              type: 'string',
+              description: 'ID público en Cloudinary',
+            },
+            secureUrl: {
+              type: 'string',
+              description: 'URL segura del archivo',
+            },
+            format: {
+              type: 'string',
+              description: 'Formato del archivo (jpg, png, mp4, etc)',
+            },
+            resourceType: {
+              type: 'string',
+              description: 'Tipo de recurso (image, video, raw, etc)',
+            },
+            bytes: {
+              type: 'integer',
+              description: 'Tamaño en bytes',
+            },
+            width: {
+              type: 'integer',
+              nullable: true,
+              description: 'Ancho en píxeles',
+            },
+            height: {
+              type: 'integer',
+              nullable: true,
+              description: 'Alto en píxeles',
+            },
+            originalName: {
+              type: 'string',
+              nullable: true,
+              description: 'Nombre original del archivo',
+            },
+            folder: {
+              type: 'string',
+              nullable: true,
+              description: 'Carpeta en Cloudinary',
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Fecha de creación',
+            },
+          },
+        },
         Error: {
           type: 'object',
           properties: {
@@ -147,9 +211,13 @@ const options: swaggerJsdoc.Options = {
         name: 'Users',
         description: 'Gestión de usuarios',
       },
+      {
+        name: 'Media',
+        description: 'Gestión de archivos multimedia',
+      },
     ],
   },
-  apis: [join(__dirname, '../modules/**/*.routes.js')],
+  apis: [join(__dirname, '../modules/**/*.routes.ts')],
 };
 
 export const swaggerSpec = swaggerJsdoc(options);
