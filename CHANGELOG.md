@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.1.3 - Fix documentación Swagger
+
+### Corregido
+- **Swagger endpoints visibles**: Cambio de lectura de archivos `.js` a `.ts` para preservar comentarios JSDoc
+- **Tag Media añadido**: Agregado tag de Media a la documentación de Swagger
+- **Schema Media añadido**: Agregado schema completo de Media con todas sus propiedades
+- Los endpoints de Auth, Users y Media ahora se muestran correctamente en `/api-docs`
+
 ## v1.1.2 - Fix errores de TypeScript en media module
 
 ### Corregido
