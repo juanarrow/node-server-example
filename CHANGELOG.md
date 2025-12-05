@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.2.0 - Soporte para despliegue en Vercel
+
+### Añadido
+- **Configuración de Vercel**: Archivo `vercel.json` con build y routing
+- **Documentación de despliegue**: Guía completa en `DEPLOY_VERCEL.md`
+- **Logger adaptativo**: Winston desactiva logs a archivo en entornos serverless
+- **Export condicional**: `src/index.ts` exporta app en Vercel, servidor tradicional en otros entornos
+- **Script de build**: `vercel-build` para ejecutar Prisma generate + TypeScript build
+- **`.vercelignore`**: Optimización del bundle para despliegue
+
+### Cambiado
+- **`src/index.ts`**: Detecta `process.env.VERCEL` y exporta app directamente para serverless
+- **`src/utils/logger.ts`**: File transports condicionales (deshabilitados en Vercel)
+- **`package.json`**: Agregado script `vercel-build`
+
+### Notas
+- ⚠️ Vercel tiene limitaciones: 10s timeout, 4.5 MB response, no filesystem persistente
+- ✅ Compatible tanto con Vercel (serverless) como con Docker/Railway (tradicional)
+- 📚 Ver `DEPLOY_VERCEL.md` para instrucciones completas de despliegue
+
 ## v1.1.3 - Fix documentación Swagger
 
 ### Corregido

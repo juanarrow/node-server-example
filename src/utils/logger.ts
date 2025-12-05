@@ -27,13 +27,22 @@ const format = winston.format.combine(
   )
 );
 
+// En entornos serverless (como Vercel), solo usamos Console
+// ya que no hay filesystem persistente para logs
 const transports = [
   new winston.transports.Console(),
-  new winston.transports.File({
-    filename: 'logs/error.log',
-    level: 'error',
-  }),
-  new winston.transports.File({ filename: 'logs/all.log' }),
+  // File transports deshabilitados para compatibilidad con serverless
+  // Si necesitas persistencia de logs, considera servicios externos como:
+  // - Logtail, Papertrail, Datadog, etc.
+  ...(process.env.VERCEL
+    ? []
+    : [
+        new winston.transports.File({
+          filename: 'logs/error.log',
+          level: 'error',
+        }),
+        new winston.transports.File({ filename: 'logs/all.log' }),
+      ]),
 ];
 
 export const logger = winston.createLogger({

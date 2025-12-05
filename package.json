@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "test": "NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest",
     "test:watch": "NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --watch",
-    "test:coverage": "NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --coverage"
+    "test:coverage": "NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+    "vercel-build": "prisma generate && npm run build"
   },
   "keywords": [],
   "author": "",

@@ -20,6 +20,8 @@ Este proyecto implementa una API REST con Node.js, Express y PostgreSQL siguiend
   - [v1.0.0 - Producción](#v100---producción-y-documentación)
   - [v1.0.1 - Fix Swagger](#v101---fix-documentación-swagger-completa)
   - [v1.0.2 - Fix tsx](#v102---fix-tsx-para-es-modules-en-desarrollo)
+  - [v1.1.0 - Upload de medios con Cloudinary](#v110---upload-de-medios-con-cloudinary)
+  - [v1.2.0 - Soporte Vercel](#v120---soporte-para-despliegue-en-vercel)
 
 ---
 
@@ -4284,6 +4286,303 @@ git commit -m "feat: Add media upload with Cloudinary integration (v1.1.0)"
 git tag v1.1.0
 git push origin main
 git push origin v1.1.0
+```
+
+---
+
+## v1.2.0 - Soporte para despliegue en Vercel
+
+**Objetivo:** Adaptar el proyecto para que pueda desplegarse tanto en plataformas serverless (Vercel) como en entornos tradicionales (Docker, Railway, Render), manteniendo compatibilidad con ambos.
+
+### Resumen de funcionalidades
+
+✅ **Configuración de Vercel** con `vercel.json`  
+✅ **Logger adaptativo** que desactiva file logs en serverless  
+✅ **Export condicional** del app según el entorno  
+✅ **Documentación completa** de despliegue en `DEPLOY_VERCEL.md`  
+✅ **Compatible con ambos modos**: serverless y tradicional  
+✅ **Optimización de bundle** con `.vercelignore`  
+
+### ⚠️ Limitaciones de Vercel
+
+**IMPORTANTE**: Vercel está optimizado para funciones serverless y tiene limitaciones:
+
+- ⏱️ **Timeout**: 10 segundos en plan gratuito (60s en Pro)
+- 📦 **Response size**: Máximo 4.5 MB
+- ❄️ **Cold starts**: Primera petición puede ser lenta
+- 💾 **Sin filesystem persistente**: Los logs no se guardan en archivos
+- 🔌 **Sin conexiones persistentes**: WebSockets no soportados
+
+### Paso 1: Archivos de configuración
+
+#### `vercel.json`
+
+```json
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "dist/index.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "dist/index.js"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "buildCommand": "npm run build",
+  "installCommand": "npm install && npx prisma generate"
+}
+```
+
+**Explicación:**
+- `builds`: Define cómo construir la función serverless
+- `routes`: Redirige todas las peticiones al `index.js`
+- `buildCommand`: Ejecuta TypeScript build
+- `installCommand`: Instala deps y genera Prisma client
+
+#### `.vercelignore`
+
+```
+node_modules
+.env
+.env.test
+.env.production
+coverage
+logs
+*.log
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+*.md
+!README.md
+src
+tests
+docker-compose.yml
+Dockerfile
+.dockerignore
+```
+
+**Explicación:**
+- Excluye archivos innecesarios del bundle
+- Reduce tamaño del despliegue
+- Solo incluye `dist/` y archivos esenciales
+
+### Paso 2: Adaptar logger para serverless
+
+**`src/utils/logger.ts`:**
+
+```typescript
+// En entornos serverless (como Vercel), solo usamos Console
+// ya que no hay filesystem persistente para logs
+const transports = [
+  new winston.transports.Console(),
+  // File transports deshabilitados para compatibilidad con serverless
+  // Si necesitas persistencia de logs, considera servicios externos como:
+  // - Logtail, Papertrail, Datadog, etc.
+  ...(process.env.VERCEL
+    ? []
+    : [
+        new winston.transports.File({
+          filename: 'logs/error.log',
+          level: 'error',
+        }),
+        new winston.transports.File({ filename: 'logs/all.log' }),
+      ]),
+];
+```
+
+**Cambios:**
+- Detecta `process.env.VERCEL`
+- En Vercel: solo logs a consola
+- En Docker/local: logs a archivos + consola
+
+### Paso 3: Export condicional en index.ts
+
+**`src/index.ts`:**
+
+```typescript
+import app from './app.js';
+import { env } from './config/env.js';
+import { logger } from './utils/logger.js';
+
+// En Vercel (serverless), exportamos la app directamente
+// En entornos tradicionales (Docker, Railway), iniciamos el servidor
+if (process.env.VERCEL) {
+  // Modo serverless: Vercel maneja las peticiones
+  export default app;
+} else {
+  // Modo tradicional: Servidor persistente
+  const server = app.listen(env.PORT, () => {
+    logger.info(`API escuchando en http://localhost:${env.PORT}`);
+    logger.info(`Entorno: ${env.NODE_ENV}`);
+  });
+
+  process.on('SIGTERM', () => {
+    logger.info('SIGTERM recibido, cerrando servidor...');
+    server.close(() => {
+      logger.info('Servidor cerrado');
+      process.exit(0);
+    });
+  });
+
+  process.on('SIGINT', () => {
+    logger.info('SIGINT recibido, cerrando servidor...');
+    server.close(() => {
+      logger.info('Servidor cerrado');
+      process.exit(0);
+    });
+  });
+}
+```
+
+**Cambios:**
+- Detecta `process.env.VERCEL`
+- En Vercel: exporta `app` directamente
+- En otros entornos: inicia servidor con `listen()`
+
+### Paso 4: Script de build para Vercel
+
+**`package.json`:**
+
+```json
+{
+  "scripts": {
+    "vercel-build": "prisma generate && npm run build"
+  }
+}
+```
+
+**Explicación:**
+- Vercel ejecuta este script automáticamente
+- Genera Prisma client antes de compilar TypeScript
+- Asegura que `@prisma/client` esté disponible
+
+### Paso 5: Configurar variables de entorno en Vercel
+
+#### Opción 1: Dashboard de Vercel
+
+1. Ve a tu proyecto en Vercel
+2. Settings → Environment Variables
+3. Añade las siguientes variables:
+
+```
+DATABASE_URL=postgresql://user:pass@host:5432/db
+JWT_SECRET=tu_secreto_jwt
+BCRYPT_SALT_ROUNDS=10
+CLOUDINARY_CLOUD_NAME=tu_cloud_name
+CLOUDINARY_API_KEY=tu_api_key
+CLOUDINARY_API_SECRET=tu_api_secret
+```
+
+#### Opción 2: CLI de Vercel
+
+```bash
+vercel env add DATABASE_URL
+vercel env add JWT_SECRET
+vercel env add BCRYPT_SALT_ROUNDS
+vercel env add CLOUDINARY_CLOUD_NAME
+vercel env add CLOUDINARY_API_KEY
+vercel env add CLOUDINARY_API_SECRET
+```
+
+**⚠️ IMPORTANTE para DATABASE_URL:**
+- Usa Supabase **Session Pooler** (puerto 5432, IPv4)
+- Formato: `postgresql://user:pass@host.pooler.supabase.com:5432/postgres`
+- NO uses Transaction Pooler (puerto 6543) con Prisma
+
+### Paso 6: Ejecutar migraciones
+
+Antes del primer despliegue, ejecuta las migraciones:
+
+```bash
+# Opción 1: Desde tu máquina local
+npx prisma migrate deploy
+
+# Opción 2: Conectarte a Supabase y ejecutar SQL manualmente
+# (ver archivos en prisma/migrations/)
+```
+
+### Paso 7: Desplegar a Vercel
+
+#### Opción 1: CLI
+
+```bash
+# Instalar CLI de Vercel
+npm i -g vercel
+
+# Login
+vercel login
+
+# Primer despliegue (preview)
+vercel
+
+# Despliegue a producción
+vercel --prod
+```
+
+#### Opción 2: GitHub Integration
+
+1. Ve a [Vercel Dashboard](https://vercel.com/dashboard)
+2. Click en "New Project"
+3. Importa tu repositorio de GitHub
+4. Configura las variables de entorno
+5. Click en "Deploy"
+
+### Paso 8: Verificar despliegue
+
+```bash
+# Reemplaza YOUR_APP_URL con tu URL de Vercel
+curl https://your-app.vercel.app/health
+
+# Deberías recibir: {"ok":true}
+
+# Probar endpoint de auth
+curl -X POST https://your-app.vercel.app/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"Test1234!","name":"Test User"}'
+```
+
+### Documentación completa
+
+Ver **`DEPLOY_VERCEL.md`** para:
+- Troubleshooting de errores comunes
+- Optimizaciones adicionales
+- Integración con servicios de logs externos
+- Comandos útiles de Vercel CLI
+
+### Resumen de v1.2.0
+
+✅ **Proyecto adaptado para Vercel**
+- Logger adaptativo (sin file logs en serverless)
+- Export condicional según entorno
+- Configuración completa en `vercel.json`
+
+✅ **Compatible con múltiples plataformas**
+- Vercel (serverless)
+- Docker (tradicional)
+- Railway, Render, Fly.io (tradicional)
+
+✅ **Documentación completa**
+- `DEPLOY_VERCEL.md` con guía paso a paso
+- Troubleshooting de errores comunes
+- Limitaciones y recomendaciones
+
+### Comandos de Git
+
+```bash
+git add .
+git commit -m "feat: Add Vercel deployment support (v1.2.0)"
+git tag v1.2.0
+git push origin main
+git push origin v1.2.0
 ```
 
 ---
